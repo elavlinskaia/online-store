@@ -4,6 +4,9 @@ import java.util.List;
 import java.util.UUID;
 import java.util.Arrays;
 
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationRegistry;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -24,6 +27,8 @@ public class OrderService {
 
     private final OrderRepository orderRepository;
     private final WebClient.Builder webClientBuilder;
+    private final ObservationRegistry observationRegistry;
+    private final ApplicationEventPublisher applicationEventPublisher;
 
     public String placeOrder(OrderRequest orderRequest) {
         Order order = new Order();
@@ -41,23 +46,28 @@ public class OrderService {
             .toList();
 
         // вызвать Inventory Service и разместить заказ, если продукт в наличии
-        InventoryResponse[] inventoryResponseArray = webClientBuilder.build().get()
-                 .uri("http://inventory-service/api/inventory",
-                        uriBuilder -> uriBuilder.queryParam("skuCode", skuCodes).build())
-                 .retrieve()
-                 .bodyToMono(InventoryResponse[].class)
-                 .block(); // для синхронного взимодействия
+        Observation inventoryServiceObservation = Observation.createNotStarted("inventory-service-lookup",
+                this.observationRegistry);
+        inventoryServiceObservation.lowCardinalityKeyValue("call", "inventory-service");
 
-        boolean allProductsInStock = Arrays.stream(inventoryResponseArray)
+        return inventoryServiceObservation.observe(() -> { // для distributed tracing
+            InventoryResponse[] inventoryResponseArray = webClientBuilder.build().get()
+                    .uri("http://inventory-service/api/inventory",
+                            uriBuilder -> uriBuilder.queryParam("skuCode", skuCodes).build())
+                    .retrieve()
+                    .bodyToMono(InventoryResponse[].class)
+                    .block(); // для синхронного взимодействия
+
+            boolean allProductsInStock = Arrays.stream(inventoryResponseArray)
                     .allMatch(InventoryResponse::isInStock);
-        
-        if (allProductsInStock) {
-            orderRepository.save(order);
-            return "Заказ успешно размещён";
-        } else {
-            throw new IllegalArgumentException("Продукта нет в продаже");
-        }
-        
+
+            if (allProductsInStock) {
+                orderRepository.save(order);
+                return "Заказ успешно размещён";
+            } else {
+                throw new IllegalArgumentException("Продукта нет в продаже");
+            }
+        });
     }
     
     private OrderLineItems mapToDto(OrderLineItemsDto orderLineItemsDto) {

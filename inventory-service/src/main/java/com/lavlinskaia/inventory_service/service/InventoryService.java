@@ -22,9 +22,9 @@ public class InventoryService {
     @Transactional(readOnly = true)
     @SneakyThrows // не использовать в продакшене!!! - ловить исключение
     public List<InventoryResponse> isInStock(List<String> skuCode) {
-        log.info("Начало ожидания");
-        Thread.sleep(10000); // симулируем медленное поведение для теста таймлимита circuit-breaker
-        log.info("Ожидание окончено");
+//        log.info("Начало ожидания");
+//        Thread.sleep(10000); // симулируем медленное поведение для теста таймлимита circuit-breaker
+//        log.info("Ожидание окончено");
         return inventoryRepository.findBySkuCodeIn(skuCode).stream()
                 .map(inventory -> InventoryResponse.builder()
                         .skuCode(inventory.getSkuCode())
